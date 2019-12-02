@@ -28,27 +28,26 @@ df.createOrReplaceTempView("df")
 rdd= df.rdd.map(list)
 
 columns= df.columns
-
-def MapFunc(x):
-
 		
-
 for i in range(len(columns)):
 	col= columns[i]
-	rSingleColumn= rdd.map(lambda x: x[i])
-	rSingleColumn= rSingleColumn.map(lambda x: (x, 1))
+	rSingleColumn= rdd.map(lambda x: str(x[i]))
+	rSingleColumn= rSingleColumn.map(lambda x: (str(x), 1))
 
 	rNonEmpty= rSingleColumn.filter(lambda x: x[0]!= "")
-	nonEmpty= rSingleColumn.reduce(lambda x, y: x[1]+y[1])
+	rNonEmpty= rNonEmpty.map(lambda x: x[1])
+	nonEmpty= rNonEmpty.reduce(lambda x, y: x+y)
+
 	rRmpty= rSingleColumn.filter(lambda x: x[0]== "")
-	empty= rRmpty.reduce(lambda x, y: x[1]+ y[1])
+	rRmpty= rRmpty.map(lambda x: x[1])
+	rRmpty= rRmpty.reduce(lambda x, y: x+y)
 
-	print(nonEmpty+" "+empty)
+	freqEach= rSingleColumn.reduceByKey(lambda x, y: x[1]+y[1])
+	freqEach.sortBy(lambda x: x[1], False)
+
+	dist= rSingleColumn.map(lambda x: x[0]).distinct()
 
 
-
-rNonEmpty= rdd.map(MapFunc)
-print(totalNumber["Age"])
 
 """
 #number of non empty cells and empty cell
