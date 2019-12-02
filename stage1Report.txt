@@ -1,0 +1,4 @@
+problem:
+1: gzip all files, use for loop or spark
+2: how to read gzfile, first think gz by spark
+3: 
