@@ -25,9 +25,32 @@ for file in gzFiles:
 fileName= "/user/hm74/NYCOpenData/"+"97pn-acdf.tsv.gz"
 df= spark.read.format('csv').options(header='true',inferschema='true', delimiter='\t').load(fileName)
 df.createOrReplaceTempView("df")
-rdd= df.rdd
+rdd= df.rdd.map(list)
+
+columns= df.columns
+
+def MapFunc(x):
+
+		
+
+for i in range(len(columns)):
+	col= columns[i]
+	rSingleColumn= rdd.map(lambda x: x[i])
+	rSingleColumn= rSingleColumn.map(lambda x: (x, 1))
+
+	rNonEmpty= rSingleColumn.filter(lambda x: x[0]!= "")
+	nonEmpty= rSingleColumn.reduce(lambda x, y: x[1]+y[1])
+	rRmpty= rSingleColumn.filter(lambda x: x[0]== "")
+	empty= rRmpty.reduce(lambda x, y: x[1]+ y[1])
+
+	print(nonEmpty+" "+empty)
 
 
+
+rNonEmpty= rdd.map(MapFunc)
+print(totalNumber["Age"])
+
+"""
 #number of non empty cells and empty cell
 columns= df.columns
 for col in columns:
@@ -46,5 +69,5 @@ for col in columns:
 	sql1= "select * from (SELECT "+col+",count(*) as total FROM df group by "+col+") as temp order by temp.total desc limit 5 "
 	top = spark.sql(sql1)
 	top= total.select(format_string("%s",dist.dist))
-
+"""
 	
