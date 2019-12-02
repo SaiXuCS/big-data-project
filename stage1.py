@@ -47,7 +47,8 @@ for i in range(len(columns)):
 
 	dist= rSingleColumn.map(lambda x: x[0]).distinct()
 
-
+	rSingleColumn= rdd.map(lambda x: x[i])
+	typeList= rSingleColumn.map(lambda x: type(x)).distinct()
 
 """
 #number of non empty cells and empty cell
