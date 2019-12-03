@@ -8,6 +8,7 @@ from pyspark.sql.functions import *
 import os
 from os import listdir
 from os.path import isfile, join
+import math
 
 mypath= "NYCOpenData"
 gzFiles = [f for f in listdir(mypath) if isfile(join(mypath, f))]
@@ -22,7 +23,7 @@ for file in gzFiles:
 	rdd = sc.textFile(fileName, 1).mapPartitions(lambda x: reader(x))
 """
 
-fileName= "/user/hm74/NYCOpenData/"+"97pn-acdf.tsv.gz"
+fileName= "/user/hm74/NYCOpenData/"+"ynhu-u9id.tsv.gz"
 df= spark.read.format('csv').options(header='true',inferschema='true', delimiter='\t').load(fileName)
 df.createOrReplaceTempView("df")
 rdd= df.rdd.map(list)
@@ -49,8 +50,33 @@ for i in range(len(columns)):
 
 	rSingleColumn= rdd.map(lambda x: x[i])
 	typeList= rSingleColumn.map(lambda x: type(x)).distinct()
+	
+
+
+	def MapFunc(x):
+		maxValue= x[0]
+		minValue= x[0]
+		total= 0
+		count= 0
+		for i in x:
+			total+= i 
+			count+= 1
+			if i> maxValue:
+				maxValue= i 
+			if i< minValue:
+				minValue= i 
+		mean= total/count
+		stdSum= 0
+		for i in x:
+			stdSum+= (i-mean)**2
+		std= math.sqrt(stdSum)/count
+		return (maxValue, minValue, mean, std)
+
+	t1= rSingleColumn.map(lambda x: (type(x), x)).groupByKey().mapValues(list)
+	maxValue= t1.map(lambda x: x[1]).map(MapFunc)
 
 """
+sql 
 #number of non empty cells and empty cell
 columns= df.columns
 for col in columns:
