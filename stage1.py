@@ -9,245 +9,277 @@ import os
 from os import listdir
 from os.path import isfile, join
 import math
-
-mypath= "NYCOpenData"
-gzFiles = [f for f in listdir(mypath) if isfile(join(mypath, f))]
-sc = SparkContext()
-spark = SparkSession.builder.appName("finak").config("spark.some.config.option", "some-value").getOrCreate()	
-
-"""
-for file in gzFiles:
-	fileName= "/user/hm74/NYCOpenData/"+file
-	df = spark.read.format('tsv').options(delimiter= '\t', header= 'true', inferschema= 'true', delimiter='\t').load(fileName)
-	df.createOrReplaceTempView("df")
-	rdd = sc.textFile(fileName, 1).mapPartitions(lambda x: reader(x))
-"""
-
-fileName= "/user/hm74/NYCOpenData/"+"yhuu-4pt3.tsv.gz"
-df= spark.read.format('csv').options(header='true',inferschema='true', delimiter='\t').load(fileName)
-df.createOrReplaceTempView("df")
-rdd= df.rdd.map(list)
-columns= df.columns
-
-
-
-#type sum
-i= 0
-col= columns[i]
-rSingleColumn= rdd.map(lambda x: str(x[i]))
-rSingleColumn= rSingleColumn.map(lambda x: (str(x), 1))
-
-rNonEmpty= rSingleColumn.filter(lambda x: x[0]!= "")
-rNonEmpty= rNonEmpty.map(lambda x: x[1])
-nonEmpty= rNonEmpty.reduce(lambda x, y: x+y)
-print(nonEmpty)
-
-rRmpty= rSingleColumn.filter(lambda x: x[0]== "")
-rRmpty= rRmpty.map(lambda x: x[1])
-if rRmpty.isEmpty()== False:
-	rRmpty= rRmpty.reduce(lambda x, y: x+y)
-else:
-	rRmpty= 0
-
-
-freqEach= rSingleColumn.reduceByKey(lambda x, y: x[1]+y[1])
-freqEach= freqEach.sortBy(lambda x: x[1], False)
-
-dist= rSingleColumn.map(lambda x: x[0]).distinct()
-dist.collect()
-
-
-
-
-
-#min max value
 import re
-def getType(x):
-	if type(x)!= type("a"):
-		return type(x)
-	else:
-		p1 = r"\d{4}\/\d{1,2}\/\d{1,2}"
-		pattern1 = re.compile(p1)
-		find = pattern1.findall(x)
-		if(len(find)!= 0):
-			return 'Date'
-
-		p1 = r"\d{1,2}\/\d{1,2}\/\d{4}"
-		pattern1 = re.compile(p1)
-		find = pattern1.findall(x)
-		if(len(find)!= 0):
-			return 'Date'
-
-		p1 = r"\d{4}\:\d{1,2}\:\d{1,2}"
-		pattern1 = re.compile(p1)
-		find = pattern1.findall(x)
-		if(len(find)!= 0):
-			return 'Date'
-
-		return type("a")
-
-#i= -1
-i= 3
-rSingleColumn= rdd.map(lambda x: x[i])
-typeList= rSingleColumn.map(getType).distinct()
-
-import math
-
-def MapFuncInt(x):
-	maxValue= x[0]
-	minValue= x[0]
-	total= 0
-	count= 0
-	for i in x:
-		total+= i 
-		count+= 1
-		if i> maxValue:
-			maxValue= i 
-		if i< minValue:
-			minValue= i 
-	mean= total/count
-	stdSum= 0
-	for i in x:
-		stdSum+= (i-mean)**2
-	std= math.sqrt(stdSum)/count
-	return (maxValue, minValue, mean, std)
-
 import datetime
+import json
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
+from pylab import *
+import numpy as np
+import sys
+import os.path
+from os import path
 
-def MapFuncDate(x):
-	minDate= ""
-	maxDate= ""
-	for i in x:
-		date= ""
-		p1 = r"\d{4}\/\d{1,2}\/\d{1,2}"
-		pattern1 = re.compile(p1)
-		find = pattern1.findall(i)
-		if(len(find)!= 0):
-			date= datetime.datetime.strptime(i, '%Y/%m/%d').strftime('%Y/%m/%d')
-
-		p1 = r"\d{1,2}\/\d{1,2}\/\d{4}"
-		pattern1 = re.compile(p1)
-		find = pattern1.findall(x)
-		if(len(find)!= 0):
-			date= datetime.datetime.strptime(i, '%m/%d/%Y').strftime('%Y/%m/%d')
-
-		p1 = r"\d{4}\:\d{1,2}\:\d{1,2}"
-		pattern1 = re.compile(p1)
-		find = pattern1.findall(x)
-		if(len(find)!= 0):
-			date= datetime.datetime.strptime(i, '%Y:%m:%d').strftime('%Y/%m/%d')
-
-		if minDate== "":
-			minDate= date 
-		elif minDate>date:
-			minDate= date 
-
-		if maxDate== "":
-			maxDate= date 
-		elif maxDate<date:
-			maxDate= date 
-
-	return (minDate, maxDate)
+sc = SparkContext()
+spark = SparkSession.builder.appName("finak").config("spark.some.config.option", "some-value").getOrCreate()
 
 
+#Qiang Luo: I split the who 1901 filenames into 19 pieces.
+#We process 100 files each time and store the information like the number of type
+#Each file will come with one json file.
 
-def groupByType(x):
-	if type(x)!= type("a"):
-		return (type(x),x)
+
+#QL:change the TXT name according to which part of files you want to process
+txt_name = "123/filename900.txt"
+file_txt = open(txt_name,"r")
+file_names = [line.replace("\n","") for line in file_txt.readlines()]
+
+
+#Define map function to decide which type data belongs to
+def typeMap(x):
+	if type(x) == type("a"):
+		date = ""
+		time = ""
+		am = " am" if "am" in x.lower() else ""
+		pm = " pm" if "pm" in x.lower() else ""
+		tp = r"24:00|2[0-3]:[0-5]\d|[0-1]\d:[0-5]\d"
+		time_pattern = re.compile(tp)
+		time_list = time_pattern.findall(x)
+		if(len(time_list)!=0):
+			time = time_list[0]
+#
+		tp = r"24:00:00|2[0-3]:[0-5]\d:[0-5]\d|[0-1]\d:[0-5]\d:[0-5]\d"
+		time_pattern = re.compile(tp)
+		time_list = time_pattern.findall(x)
+		if(len(time_list)!=0):
+			time = time_list[0]
+#
+		for symbol in date_symbol:
+			dp = r"\d{4}"+symbol+"\d{2}"+symbol+"\d{2}"
+			date_pattern = re.compile(dp)
+			date_list = date_pattern.findall(x)
+			if(len(date_list)!=0):
+				try:
+					date = datetime.datetime.strptime(date_list[0], '%Y'+symbol+'%m'+symbol+'%d').strftime('%Y/%m/%d')
+				except:
+					date = ""
+#
+		for symbol in date_symbol:
+			dp = r"\d{2}"+symbol+"\d{2}"+symbol+"\d{4}"
+			date_pattern = re.compile(dp)
+			date_list = date_pattern.findall(x)
+			if(len(date_list)!=0):
+				try:
+					date = datetime.datetime.strptime(date_list[0], '%m'+symbol+'%d'+symbol+'%Y').strftime('%Y/%m/%d')
+				except:
+					date = ""
+#
+		if(date!="" and len(x)<25):
+			return ("Date",date+" "+ time+ " "+ am+pm)
+		return ("Text",x)
 	else:
-		p1 = r"\d{4}\/\d{1,2}\/\d{1,2}"
-		pattern1 = re.compile(p1)
-		find = pattern1.findall(x)
-		if(len(find)!= 0):
-			return ('Date', x)
+		if(type(x)==type(1.0)):
+			return ("Real",x)
+		elif(type(x)==type(1)):
+			return ("Integer",x)
+		elif(isinstance(x, datetime.datetime)):
+			return("Date",str(x))
+	return ("Other",x)
 
-		p1 = r"\d{1,2}\/\d{1,2}\/\d{4}"
-		pattern1 = re.compile(p1)
-		find = pattern1.findall(x)
-		if(len(find)!= 0):
-			return ('Date', x)
-
-		p1 = r"\d{4}\:\d{1,2}\:\d{1,2}"
-		pattern1 = re.compile(p1)
-		find = pattern1.findall(x)
-		if(len(find)!= 0):
-			return ('Date', x)
-
-		return (type("a"),x)
-
-t1= rSingleColumn.map(groupByType).groupByKey().mapValues(list)
-intFloatValue= t1.filter(lambda x: x[0]== type(1) or x[0]== type(1.0)).map(lambda x: x[1]).map(MapFuncInt)
-dateValue= t1.filter(lambda x: x[0]== 'Date').map(lambda x: x[1]).map(MapFuncDate)
-
-	
-"""	
-for i in range(len(columns)):
-	col= columns[i]
-	rSingleColumn= rdd.map(lambda x: str(x[i]))
-	rSingleColumn= rSingleColumn.map(lambda x: (str(x), 1))
-
-	rNonEmpty= rSingleColumn.filter(lambda x: x[0]!= "")
-	rNonEmpty= rNonEmpty.map(lambda x: x[1])
-	nonEmpty= rNonEmpty.reduce(lambda x, y: x+y)
-
-	rRmpty= rSingleColumn.filter(lambda x: x[0]== "")
-	rRmpty= rRmpty.map(lambda x: x[1])
-	rRmpty= rRmpty.reduce(lambda x, y: x+y)
-
-	freqEach= rSingleColumn.reduceByKey(lambda x, y: x[1]+y[1])
-	freqEach.sortBy(lambda x: x[1], False)
-
-	dist= rSingleColumn.map(lambda x: x[0]).distinct()
-
-	rSingleColumn= rdd.map(lambda x: x[i])
-	typeList= rSingleColumn.map(lambda x: type(x)).distinct()
-	
+date_symbol = ['/',' ','-',"\."]
 
 
-	def MapFunc(x):
-		maxValue= x[0]
-		minValue= x[0]
-		total= 0
-		count= 0
-		for i in x:
-			total+= i 
-			count+= 1
-			if i> maxValue:
-				maxValue= i 
-			if i< minValue:
-				minValue= i 
-		mean= total/count
-		stdSum= 0
-		for i in x:
-			stdSum+= (i-mean)**2
-		std= math.sqrt(stdSum)/count
-		return (maxValue, minValue, mean, std)
-
-	t1= rSingleColumn.map(lambda x: (type(x), x)).groupByKey().mapValues(list)
-	maxValue= t1.map(lambda x: x[1]).map(MapFunc)
-
-"""
+col_list = []
 
 
-"""
-sql 
-#number of non empty cells and empty cell
-columns= df.columns
-for col in columns:
-	sql1= "SELECT count("+col+") as total FROM df"
-	total = spark.sql(sql1)
-	total= total.select(format_string("%s",total.total))
+typeColumnCount= {}
+typeColumnCount["Date"]= 0
+typeColumnCount["Integer"]= 0
+typeColumnCount["Text"]= 0
+typeColumnCount["Real"]= 0
 
-	sq1= "SELECT count("+col+") as empty FROM df where "+col+"<>''"
-	empty = spark.sql(sql1)
-	empty= total.select(format_string("%s",empty.empty))
+twoFreq= []
+threeFreq= []
+fourFreq= []
 
-	sql1= "SELECT count(distinct "+col+") as dist FROM df"
-	dist = spark.sql(sql1)
-	dist= total.select(format_string("%s",dist.dist))
+def real_compute(x):
+	threshold = (sys.float_info.max/real_count)**0.5
+	res = x-mean_real
+	if res > threshold or res < -threshold:
+		return threshold**2
+	return res**2
 
-	sql1= "select * from (SELECT "+col+",count(*) as total FROM df group by "+col+") as temp order by temp.total desc limit 5 "
-	top = spark.sql(sql1)
-	top= total.select(format_string("%s",dist.dist))
-"""
-	
+def int_compute(x):
+	threshold = (sys.maxsize/int_count)**0.5
+	res = x-mean_int
+	if res > threshold or res < -threshold:
+		return threshold**2
+	return res**2
+
+
+
+for name in file_names:
+	df= spark.read.format('csv').options(header='true',inferschema='true', delimiter='\t').load(name)
+	df.createOrReplaceTempView("df")
+	rdd= df.rdd.map(list)
+	total_count = rdd.count()
+	column_name= df.columns
+	dict_dataset = {}
+	fileName = name.split('/')[4].split(".")[0]
+	dict_dataset["dataset_name"] = fileName
+	if path.exists(fileName+".json"):
+		continue
+#
+	for i in range(len(column_name)):
+		rSingleColumn= rdd.map(lambda x: x[i])
+		rSingleColumn_count= rSingleColumn.map(lambda x: (str(x), 1))
+		rNonEmpty= rSingleColumn_count.filter(lambda x: x[0] != None)
+		nonEmpty_count = rNonEmpty.count()
+		nonEmpty= rNonEmpty.reduceByKey(lambda x, y: x+y)
+		empty_count = total_count - nonEmpty_count
+		dist_count = nonEmpty.filter(lambda x: x[1]==1).count()
+		freq_list = nonEmpty.sortBy(lambda x: x[1], False).keys().take(5)
+#
+		col= {}
+		col["column_name"] = column_name[i]
+		col["number_non_empty_cells"] = nonEmpty_count
+		col["number_empty_cells"] = empty_count
+		col["number_distinct_values"] = dist_count
+		col["frequent_values"] = freq_list
+#
+		type_list = []
+		rSingleColumn_type = rSingleColumn.map(typeMap)
+		rSingleColumn_date = rSingleColumn_type.filter(lambda x:x[0] == "Date")
+		rSingleColumn_int = rSingleColumn_type.filter(lambda x:x[0] == "Integer").values()
+		rSingleColumn_real = rSingleColumn_type.filter(lambda x:x[0] == "Real").values()
+		rSingleColumn_text = rSingleColumn_type.filter(lambda x:x[0] == "Text").values()
+#
+		date_count= 0
+		text_count= 0
+		integer_count= 0
+		real_count= 0
+#
+		if(len(rSingleColumn_date.take(1))!=0):
+			typeColumnCount["Date"]+= 1
+			date_count = rSingleColumn_date.count()
+			min_time = rSingleColumn_date.min()[1]
+			max_time = rSingleColumn_date.max()[1]
+			type_dict = {}
+			type_dict["type"] = "DATE/TIME"
+			type_dict["count"] = date_count
+			type_dict["max_value"] = max_time
+			type_dict["min_value"] = min_time
+			type_list.append(type_dict)
+#
+		if(len(rSingleColumn_int.take(1))!=0):
+			typeColumnCount["Integer"]+= 1
+			int_count = rSingleColumn_int.count()
+			min_int = rSingleColumn_int.min()
+			max_int = rSingleColumn_int.max()
+			sum_int = rSingleColumn_int.sum()
+			mean_int = sum_int/int_count
+			variance_int = rSingleColumn_int.map(int_compute).sum()/int_count
+			std_int = variance_int**0.5
+			type_dict = {}
+			type_dict["type"] = "INTEGER (LONG)"
+			type_dict["count"] = int_count
+			type_dict["max_value"] = max_int
+			type_dict["min_value"] = min_int
+			type_dict["mean"] = mean_int
+			type_dict["stddev"] = std_int
+			type_list.append(type_dict)
+#
+		if(len(rSingleColumn_real.take(1))!=0):
+			typeColumnCount["Real"]+= 1
+			real_count = rSingleColumn_real.count()
+			min_real = rSingleColumn_real.min()
+			max_real = rSingleColumn_real.max()
+			sum_real = rSingleColumn_real.sum()
+			mean_real = sum_real/real_count
+			variance_real = rSingleColumn_real.map(real_compute).sum()/real_count
+			std_real = variance_real**0.5
+			type_dict = {}
+			type_dict["type"] = "REAL"
+			type_dict["count"] = real_count
+			type_dict["max_value"] = max_real
+			type_dict["min_value"] = min_real
+			type_dict["mean"] = mean_real
+			type_dict["stddev"] = std_real
+			type_list.append(type_dict)
+#
+		if(len(rSingleColumn_text.take(1))!=0):
+			typeColumnCount["Text"]+= 1
+			text_count = rSingleColumn_text.count()
+			rSingleColumn_text_length = rSingleColumn_text.map(lambda x: (x,len(x)))
+			rSingleColumn_text_short = rSingleColumn_text_length.sortBy(lambda x: x[1]).take(5)
+			text_short = [x[0] for x in rSingleColumn_text_short]
+			rSingleColumn_text_long = rSingleColumn_text_length.sortBy(lambda x: x[1],False).take(5)
+			text_long = [x[0] for x in rSingleColumn_text_long]
+			text_avg = rSingleColumn_text_length.values().sum()/text_count
+			type_dict = {}
+			type_dict["type"] = "TEXT"
+			type_dict["count"] = text_count
+			type_dict["shortest_values"] = text_short
+			type_dict["longest_values"] = text_long
+			type_dict["average_length"] = text_avg
+			type_list.append(type_dict)
+#
+		arrUnSort= []
+		arrUnSort.append(("Date", date_count))
+		arrUnSort.append(("Text", text_count))
+		arrUnSort.append(("Integer", integer_count))
+		arrUnSort.append(("Real", real_count))
+		arrUnSort.sort(key= lambda x: x[1], reverse=True)
+		firstItem= arrUnSort[0]
+		secondItem= arrUnSort[1]
+		thridItem= arrUnSort[2]
+		fourthItem= arrUnSort[3]
+#
+		if secondItem[1]!= 0:
+			twoFreqItem= ((firstItem[0], secondItem[0]), secondItem[1])
+			twoFreq.append(twoFreqItem)
+		if thridItem[1]!= 0:
+			thirdFreqItem= ((firstItem[0], secondItem[0], thridItem[0]), thridItem[1])
+			threeFreq.append(thirdFreqItem)
+		if fourthItem[1]!= 0:
+			fourthFreqItem= ((firstItem[0], secondItem[0], thridItem[0], fourthItem[0]), fourthItem[1])
+			fourFreq.append(fourthFreqItem)
+#
+		col["data_types"] = type_list
+		col_list.append(col)
+#
+	typeColumnCountFile = open("count900.txt","w")
+	for key in typeColumnCount.keys():
+		typeColumnCountFile.write(key+": "+str(typeColumnCount.get(key,0))+"\n")
+	for item in twoFreq:
+			typeColumnCountFile.write(item[0][0]+" "+ item[0][1]+": "+str(item[1])+"\n")
+	for item in threeFreq:
+		typeColumnCountFile.write(item[0][0]+" "+ item[0][1]+" "+item[0][2]+": "+str(item[1])+"\n")
+	for item in fourFreq:
+		typeColumnCountFile.write(item[0][0]+" "+ item[0][1]+" "+item[0][2]+" "+ item[0][3]+": "+str(item[1])+"\n")
+	typeColumnCountFile.close()
+#
+	dict_dataset["columns"] = col_list
+	with open(fileName+'.json', 'w') as fp:
+		json.dump(dict_dataset, fp,default=str)
+
+
+
+
+#below codes are used to generate a histogram shows the number of each data type
+'''
+label_list= []
+keys= typeColumnCount.keys()
+label_list = [key for key in keys]
+
+plt.bar(range(len(label_list)), [typeColumnCount.get(xtick, 0) for xtick in label_list], align='center',yerr=0.000001)
+plt.xticks(range(len(label_list)), label_list)
+plt.xlabel('Type')
+plt.ylabel('Frequency')
+plt.savefig("total.jpg")
+'''
+
+
+
+
