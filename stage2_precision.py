@@ -19,11 +19,6 @@ import numpy as np
 sc = SparkContext()
 spark = SparkSession.builder.appName("finak").config("spark.some.config.option", "some-value").getOrCreate()    
 
-"""
-txt_name = "123/filename100.txt"
-file_txt = open(txt_name,"r")
-file_names = [line.replace("\n","") for line in file_txt.readlines()]
-"""
 
 fileName= "label.csv"
 
@@ -368,8 +363,6 @@ for file in fileNameArr:
         df.createOrReplaceTempView("df")
         rdd= df.rdd.map(list)
         print("size: "+str(rdd.count()))
-        if rdd.count()> 1000000:
-            continue
         columns= df.columns
         #label->count for this file
         correct_label= {}
@@ -399,10 +392,13 @@ for file in fileNameArr:
 
             resDict["colunms"].append(column_dict)
             #pair is (label, count) for this file
+            #we first check whether this cuolumn is labeled by our group
             if predictFileColumn in fileColumnLabel:
                 for pair in arr:
                     labelName= pair[0]
                     key= file_name_use_true+" "+col+" "+labelName
+                    #if file+coulmn+predict exist in our label.json file
+                    #it means we find correct prediction
                     if key in predict_column_label.keys():
                         if labelName in correct_label.keys():
                             correct_label[labelName]+=1
@@ -475,21 +471,22 @@ with open("data/count1.txt", 'w') as ff:
     for key in label_count.keys():
         value= label_count.get(key)
         ff.write("label: "+str(key)+" count: "+str(value)+"\n")
-"""
-encoding="utf-8"
+
 
 label_list= []
 keys= label_count.keys()
 label_list = [key for key in keys]
 
 plt.figure()
-plt.subplot(2, 1, 1)
 plt.bar(range(len(label_list)), [label_count.get(xtick, 0) for xtick in label_list], align='center',yerr=0.000001)
 plt.xticks(range(len(label_list)), label_list)
 plt.xlabel('Label')
 plt.ylabel('Frequency')
+plt.savefig("labe_count.jpg")
 
 
+
+plt.figure()
 label_list2 = ["hetergous, homogenous"]
 label_value2= []
 label_value2.append(label_heter)
@@ -499,8 +496,7 @@ label_value2.append(label_homo)
 plt.subplot(2, 1, 2)
 plt.bar(range(len(label_list2)), label_value1, align='center',yerr=0.000001)
 plt.xticks(range(len(label_list2)), label_list2)
-plt.xlabel('Column Type')
+plt.xlabel('Label_type')
 plt.ylabel('Frequency')
 
-plt.savefig("stage2.jpg")
-"""
+plt.savefig("heterogous.jpg")

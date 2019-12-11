@@ -18,8 +18,6 @@ matplotlib.use('Agg')
 from pylab import *
 import numpy as np
 import sys
-import os.path
-from os import path
 
 sc = SparkContext()
 spark = SparkSession.builder.appName("finak").config("spark.some.config.option", "some-value").getOrCreate()
@@ -31,7 +29,7 @@ spark = SparkSession.builder.appName("finak").config("spark.some.config.option",
 
 
 #QL:change the TXT name according to which part of files you want to process
-txt_name = "123/filename900.txt"
+txt_name = "filename300.txt"
 file_txt = open(txt_name,"r")
 file_names = [line.replace("\n","") for line in file_txt.readlines()]
 
@@ -43,18 +41,21 @@ def typeMap(x):
 		time = ""
 		am = " am" if "am" in x.lower() else ""
 		pm = " pm" if "pm" in x.lower() else ""
+#There is data like "2018/01/01 12:00:00 AM"
+#So we need to check whether the data contains date or time or "am"
+#First time pattern hour/min
 		tp = r"24:00|2[0-3]:[0-5]\d|[0-1]\d:[0-5]\d"
 		time_pattern = re.compile(tp)
 		time_list = time_pattern.findall(x)
 		if(len(time_list)!=0):
 			time = time_list[0]
-#
+#Second time pattern: hour/min/sec
 		tp = r"24:00:00|2[0-3]:[0-5]\d:[0-5]\d|[0-1]\d:[0-5]\d:[0-5]\d"
 		time_pattern = re.compile(tp)
 		time_list = time_pattern.findall(x)
 		if(len(time_list)!=0):
 			time = time_list[0]
-#
+#First date pattern: year/month/day for four types of symbol "-","/",".",""
 		for symbol in date_symbol:
 			dp = r"\d{4}"+symbol+"\d{2}"+symbol+"\d{2}"
 			date_pattern = re.compile(dp)
@@ -64,7 +65,7 @@ def typeMap(x):
 					date = datetime.datetime.strptime(date_list[0], '%Y'+symbol+'%m'+symbol+'%d').strftime('%Y/%m/%d')
 				except:
 					date = ""
-#
+#Second date pattern: month/day/year for four types of symbol "-","/",".",""
 		for symbol in date_symbol:
 			dp = r"\d{2}"+symbol+"\d{2}"+symbol+"\d{4}"
 			date_pattern = re.compile(dp)
@@ -74,7 +75,8 @@ def typeMap(x):
 					date = datetime.datetime.strptime(date_list[0], '%m'+symbol+'%d'+symbol+'%Y').strftime('%Y/%m/%d')
 				except:
 					date = ""
-#
+#Datetype must have valid date
+#Half of string contains date information should be considered as datetpe.
 		if(date!="" and len(x)<25):
 			return ("Date",date+" "+ time+ " "+ am+pm)
 		return ("Text",x)
@@ -89,16 +91,17 @@ def typeMap(x):
 
 date_symbol = ['/',' ','-',"\."]
 
-
+#create a dict to store all data information, which will be turned into json file.
 col_list = []
 
-
+#create a dict to count the total number of four data types of all files.
 typeColumnCount= {}
 typeColumnCount["Date"]= 0
 typeColumnCount["Integer"]= 0
 typeColumnCount["Text"]= 0
 typeColumnCount["Real"]= 0
 
+#record datatype frequency
 twoFreq= []
 threeFreq= []
 fourFreq= []
@@ -128,8 +131,6 @@ for name in file_names:
 	dict_dataset = {}
 	fileName = name.split('/')[4].split(".")[0]
 	dict_dataset["dataset_name"] = fileName
-	if path.exists(fileName+".json"):
-		continue
 #
 	for i in range(len(column_name)):
 		rSingleColumn= rdd.map(lambda x: x[i])
@@ -140,26 +141,27 @@ for name in file_names:
 		empty_count = total_count - nonEmpty_count
 		dist_count = nonEmpty.filter(lambda x: x[1]==1).count()
 		freq_list = nonEmpty.sortBy(lambda x: x[1], False).keys().take(5)
-#
+#Store the information of each column
 		col= {}
 		col["column_name"] = column_name[i]
 		col["number_non_empty_cells"] = nonEmpty_count
 		col["number_empty_cells"] = empty_count
 		col["number_distinct_values"] = dist_count
 		col["frequent_values"] = freq_list
-#
+#Given that column may have multiple types, each type will checked for each column.
 		type_list = []
 		rSingleColumn_type = rSingleColumn.map(typeMap)
 		rSingleColumn_date = rSingleColumn_type.filter(lambda x:x[0] == "Date")
 		rSingleColumn_int = rSingleColumn_type.filter(lambda x:x[0] == "Integer").values()
 		rSingleColumn_real = rSingleColumn_type.filter(lambda x:x[0] == "Real").values()
 		rSingleColumn_text = rSingleColumn_type.filter(lambda x:x[0] == "Text").values()
-#
+#count the number of each data type of each column
 		date_count= 0
 		text_count= 0
 		integer_count= 0
 		real_count= 0
-#
+#if there is a date type
+#date_count add one and all information of date type will be stored
 		if(len(rSingleColumn_date.take(1))!=0):
 			typeColumnCount["Date"]+= 1
 			date_count = rSingleColumn_date.count()
@@ -235,7 +237,7 @@ for name in file_names:
 		secondItem= arrUnSort[1]
 		thridItem= arrUnSort[2]
 		fourthItem= arrUnSort[3]
-#
+#Store each heterogeneous column's data types
 		if secondItem[1]!= 0:
 			twoFreqItem= ((firstItem[0], secondItem[0]), secondItem[1])
 			twoFreq.append(twoFreqItem)
@@ -248,8 +250,10 @@ for name in file_names:
 #
 		col["data_types"] = type_list
 		col_list.append(col)
-#
-	typeColumnCountFile = open("count900.txt","w")
+#Record the number of data types of 100 files
+#Change the filename if you test different collection of files
+#If you process the data of "filename200.txt", then use the filename "count200" to store information.
+	typeColumnCountFile = open("count300.txt","w")
 	for key in typeColumnCount.keys():
 		typeColumnCountFile.write(key+": "+str(typeColumnCount.get(key,0))+"\n")
 	for item in twoFreq:
@@ -259,7 +263,7 @@ for name in file_names:
 	for item in fourFreq:
 		typeColumnCountFile.write(item[0][0]+" "+ item[0][1]+" "+item[0][2]+" "+ item[0][3]+": "+str(item[1])+"\n")
 	typeColumnCountFile.close()
-#
+#store all columns information and turn it into json file
 	dict_dataset["columns"] = col_list
 	with open(fileName+'.json', 'w') as fp:
 		json.dump(dict_dataset, fp,default=str)
@@ -268,7 +272,7 @@ for name in file_names:
 
 
 #below codes are used to generate a histogram shows the number of each data type
-'''
+
 label_list= []
 keys= typeColumnCount.keys()
 label_list = [key for key in keys]
@@ -278,7 +282,7 @@ plt.xticks(range(len(label_list)), label_list)
 plt.xlabel('Type')
 plt.ylabel('Frequency')
 plt.savefig("total.jpg")
-'''
+
 
 
 
